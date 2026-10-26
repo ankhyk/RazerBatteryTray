@@ -1,0 +1,16 @@
+.vs/
+bin/
+obj/
+*.user
+*.aps
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.log
+*.suo
+*.VC.db
+*.VC.opendb
+*.exe
+*.obj
+*.dll
