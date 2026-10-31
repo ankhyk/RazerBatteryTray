@@ -35,6 +35,7 @@ private:
 
     BatteryItem mouse_item_;
     BatteryItem headset_item_;
+    BatteryItem keyboard_item_;
     BatteryItem combined_item_;
     ITrafficMonitor* app_ = nullptr;
     COLORREF value_color_ = 0;

@@ -1,13 +1,15 @@
 # RazerBattery
 
-[TrafficMonitor](https://github.com/zhongyang219/TrafficMonitor) 插件，在任务栏显示 Razer 鼠标和耳机电量。
+[TrafficMonitor](https://github.com/zhongyang219/TrafficMonitor) 插件，在任务栏显示外设（鼠标、耳机、键盘）电量。
 
-当前针对这两台设备做了适配：
+当前支持的设备：
 
-| 设备 | PID | 读电量方式 |
+| 设备 | VID / PID | 读电量方式 |
 | --- | --- | --- |
-| Razer Viper V2 Pro | `00A6` / `00A5` | HID Feature Report（OpenRazer `0x07/0x80`） |
-| Razer BlackShark V2 Pro | `0528` | HID Feature Report `0xFF`；失败时回退到 Synapse 3 日志 |
+| Razer Viper V2 Pro | `1532` : `00A6` / `00A5` | HID Feature Report（OpenRazer `0x07/0x80`） |
+| Razer BlackShark V2 Pro | `1532` : `0528` | HID Feature Report `0xFF`；失败时回退到 Synapse 3 日志 |
+| 迈从 MCHOSE K99 V3 | `3837` : `2020` / `201F` | 65 字节 HID Output/Input Report（`0x55/0x05` getFuncConfig） |
+| Razer 常用无线键盘 | `1532` | HID Feature Report（OpenRazer `0x07/0x80`） |
 
 ## 安装
 
@@ -20,7 +22,8 @@
 5. 右键任务栏窗口 → **显示设置**，勾选：
    - `Razer 鼠标电量`（鼠标图标 + 百分比）
    - `Razer 耳机电量`（耳机图标 + 百分比）
-   - 或 `Razer 电量`（两个图标并排）
+   - `键盘电量`（键盘图标 + 百分比）
+   - 或 `外设电量`（并排显示所有已连接外设）
 
 充电中会在百分比后面加 `+`，例如 `85%+`。图标颜色跟随任务栏文字颜色。鼠标悬停可看设备名和充电状态。电量低于 20% 时会弹一次通知。
 
@@ -50,6 +53,7 @@ notify=1
 
 - 鼠标：91 字节 Feature Report，命令类 `0x07`，电量 `0x80`，充电 `0x84`，transaction id `0x1F` / `0x3F`。返回值 `0–255`，按 `raw * 100 / 255` 换成百分比。接口需要共享打开。
 - 耳机：64 字节 Feature Report，Report ID `0xFF`，第 14 字节是 `0–100` 的电量。不向耳机写 Output Report，避免和 Synapse 抢占用。
+- 迈从键盘：65 字节 Output Report（`0x00, 0x55, 0x05, 0x00, 56, 56...`），返回 65 字节 Input Report（`0x00, 0xAA, 0x05...`），第 41 字节的低 7 位为电量，最高位为充电标识。
 - 回退：`C:\ProgramData\Razer\Synapse3\Service\Bin\Devices\Mw\Log\RzCtl_XXXX.log` 里的 `Power_BatteryLevel`。
 
 ## 开发参考

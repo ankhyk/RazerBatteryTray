@@ -24,6 +24,9 @@ constexpr USHORT kRazerVid = 0x1532;
 constexpr USHORT kPidViperWired = 0x00A5;
 constexpr USHORT kPidViperWireless = 0x00A6;
 constexpr USHORT kPidBlackShark = 0x0528;
+constexpr USHORT kMchoseVid = 0x3837;
+constexpr USHORT kPidMchoseK99_2_4G = 0x2020;
+constexpr USHORT kPidMchoseK99_Wired = 0x201F;
 
 constexpr int kRazerReportSize = 90;
 constexpr int kMouseFeatureLen = 91;
@@ -96,14 +99,17 @@ bool SendRazerCommand(HANDLE handle, uint8_t txn, uint8_t cls, uint8_t cmd, Raze
 
 struct HidInfo {
     std::wstring path;
+    USHORT vid = 0;
     USHORT pid = 0;
     USHORT usage_page = 0;
     USHORT usage = 0;
     USHORT feature_len = 0;
+    USHORT input_len = 0;
+    USHORT output_len = 0;
     std::wstring product;
 };
 
-std::vector<HidInfo> EnumRazerHid() {
+std::vector<HidInfo> EnumHid(USHORT filter_vid = 0) {
     std::vector<HidInfo> devices;
     GUID hid_guid{};
     HidD_GetHidGuid(&hid_guid);
@@ -136,13 +142,25 @@ std::vector<HidInfo> EnumRazerHid() {
 
         HIDD_ATTRIBUTES attr{};
         attr.Size = sizeof(attr);
-        if (!HidD_GetAttributes(handle, &attr) || attr.VendorID != kRazerVid) {
+        if (!HidD_GetAttributes(handle, &attr)) {
             CloseHandle(handle);
             continue;
+        }
+        if (filter_vid != 0) {
+            if (attr.VendorID != filter_vid) {
+                CloseHandle(handle);
+                continue;
+            }
+        } else {
+            if (attr.VendorID != kRazerVid && attr.VendorID != kMchoseVid) {
+                CloseHandle(handle);
+                continue;
+            }
         }
 
         HidInfo item;
         item.path = detail->DevicePath;
+        item.vid = attr.VendorID;
         item.pid = attr.ProductID;
         wchar_t product[256]{};
         if (HidD_GetProductString(handle, product, sizeof(product))) {
@@ -156,6 +174,8 @@ std::vector<HidInfo> EnumRazerHid() {
                 item.usage_page = caps.UsagePage;
                 item.usage = caps.Usage;
                 item.feature_len = caps.FeatureReportByteLength;
+                item.input_len = caps.InputReportByteLength;
+                item.output_len = caps.OutputReportByteLength;
             }
             HidD_FreePreparsedData(parsed);
         }
@@ -262,6 +282,7 @@ void RazerMonitor::Poll(bool force) {
 
     BatteryReading mouse;
     BatteryReading headset;
+    BatteryReading keyboard;
     const bool mouse_hid = PollMouseHid(mouse);
     if (!mouse_hid) {
         if (!PollSynapseLog(kPidViperWireless, mouse)) {
@@ -273,6 +294,8 @@ void RazerMonitor::Poll(bool force) {
     if (!headset_hid) {
         PollSynapseLog(kPidBlackShark, headset);
     }
+
+    PollKeyboardHid(keyboard);
 
     std::lock_guard<std::mutex> lock(mutex_);
     if (notify_low_battery_) {
@@ -293,10 +316,20 @@ void RazerMonitor::Poll(bool force) {
         } else if (!headset.online || headset.percent >= low_battery_percent_ + 5) {
             headset_was_low_ = false;
         }
+
+        if (keyboard.online && keyboard.percent >= 0 && keyboard.percent < low_battery_percent_) {
+            if (!keyboard_was_low_) {
+                keyboard_notify_pending_ = true;
+            }
+            keyboard_was_low_ = true;
+        } else if (!keyboard.online || keyboard.percent >= low_battery_percent_ + 5) {
+            keyboard_was_low_ = false;
+        }
     }
 
     mouse_ = std::move(mouse);
     headset_ = std::move(headset);
+    keyboard_ = std::move(keyboard);
 }
 
 BatteryReading RazerMonitor::Mouse() const {
@@ -309,17 +342,32 @@ BatteryReading RazerMonitor::Headset() const {
     return headset_;
 }
 
+BatteryReading RazerMonitor::Keyboard() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return keyboard_;
+}
+
 std::wstring RazerMonitor::ValueText(DeviceSlot slot) const {
     std::lock_guard<std::mutex> lock(mutex_);
     if (slot == DeviceSlot::Combined) {
-        return FormatPercent(mouse_) + L" / " + FormatPercent(headset_);
+        std::wstring text = FormatPercent(mouse_) + L" / " + FormatPercent(headset_);
+        if (keyboard_.online) {
+            text += L" / " + FormatPercent(keyboard_);
+        }
+        return text;
     }
-    return FormatPercent(slot == DeviceSlot::Mouse ? mouse_ : headset_);
+    if (slot == DeviceSlot::Mouse) {
+        return FormatPercent(mouse_);
+    }
+    if (slot == DeviceSlot::Headset) {
+        return FormatPercent(headset_);
+    }
+    return FormatPercent(keyboard_);
 }
 
 std::wstring RazerMonitor::SampleText(DeviceSlot slot) const {
     if (slot == DeviceSlot::Combined) {
-        return L"100%+ / 100%+";
+        return L"100%+ / 100%+ / 100%+";
     }
     return L"100%+";
 }
@@ -330,9 +378,11 @@ std::wstring RazerMonitor::LabelText(DeviceSlot slot, bool chinese) const {
         return chinese ? L"鼠标" : L"Mouse";
     case DeviceSlot::Headset:
         return chinese ? L"耳机" : L"HS";
+    case DeviceSlot::Keyboard:
+        return chinese ? L"键盘" : L"KB";
     case DeviceSlot::Combined:
     default:
-        return L"Razer";
+        return L"外设";
     }
 }
 
@@ -342,9 +392,11 @@ std::wstring RazerMonitor::ItemName(DeviceSlot slot, bool chinese) const {
         return chinese ? L"Razer 鼠标电量" : L"Razer mouse battery";
     case DeviceSlot::Headset:
         return chinese ? L"Razer 耳机电量" : L"Razer headset battery";
+    case DeviceSlot::Keyboard:
+        return chinese ? L"键盘电量" : L"Keyboard battery";
     case DeviceSlot::Combined:
     default:
-        return chinese ? L"Razer 电量" : L"Razer battery";
+        return chinese ? L"外设电量" : L"Peripherals battery";
     }
 }
 
@@ -368,7 +420,9 @@ std::wstring RazerMonitor::Tooltip(bool chinese) const {
         }
         return text;
     };
-    return line(mouse_, L"鼠标", L"Mouse") + L"\n" + line(headset_, L"耳机", L"Headset");
+    return line(mouse_, L"鼠标", L"Mouse") + L"\n" +
+           line(headset_, L"耳机", L"Headset") + L"\n" +
+           line(keyboard_, L"键盘", L"Keyboard");
 }
 
 float RazerMonitor::GraphValue(DeviceSlot slot) const {
@@ -380,15 +434,29 @@ float RazerMonitor::GraphValue(DeviceSlot slot) const {
         return (std::max)(0.0f, (std::min)(1.0f, reading.percent / 100.0f));
     };
     if (slot == DeviceSlot::Combined) {
-        if (mouse_.online && headset_.online) {
-            return (std::min)(clamp(mouse_), clamp(headset_));
-        }
+        float min_val = 1.0f;
+        bool any = false;
         if (mouse_.online) {
-            return clamp(mouse_);
+            min_val = (std::min)(min_val, clamp(mouse_));
+            any = true;
         }
+        if (headset_.online) {
+            min_val = (std::min)(min_val, clamp(headset_));
+            any = true;
+        }
+        if (keyboard_.online) {
+            min_val = (std::min)(min_val, clamp(keyboard_));
+            any = true;
+        }
+        return any ? min_val : 0.0f;
+    }
+    if (slot == DeviceSlot::Mouse) {
+        return clamp(mouse_);
+    }
+    if (slot == DeviceSlot::Headset) {
         return clamp(headset_);
     }
-    return clamp(slot == DeviceSlot::Mouse ? mouse_ : headset_);
+    return clamp(keyboard_);
 }
 
 bool RazerMonitor::ConsumeLowBatteryNotify(std::wstring& message, bool chinese) {
@@ -404,6 +472,13 @@ bool RazerMonitor::ConsumeLowBatteryNotify(std::wstring& message, bool chinese) 
         headset_notify_pending_ = false;
         wchar_t buf[128];
         swprintf_s(buf, chinese ? L"Razer 耳机电量低：%d%%" : L"Razer headset battery low: %d%%", headset_.percent);
+        message = buf;
+        return true;
+    }
+    if (keyboard_notify_pending_) {
+        keyboard_notify_pending_ = false;
+        wchar_t buf[128];
+        swprintf_s(buf, chinese ? L"键盘电量低：%d%%" : L"Keyboard battery low: %d%%", keyboard_.percent);
         message = buf;
         return true;
     }
@@ -446,7 +521,7 @@ bool RazerMonitor::PollMouseHid(BatteryReading& out) {
         mouse_path_.clear();
     }
 
-    const auto devices = EnumRazerHid();
+    const auto devices = EnumHid(kRazerVid);
     for (const auto& device : devices) {
         if (device.feature_len != kMouseFeatureLen) {
             continue;
@@ -499,7 +574,7 @@ bool RazerMonitor::PollHeadsetHid(BatteryReading& out) {
         headset_path_.clear();
     }
 
-    const auto devices = EnumRazerHid();
+    const auto devices = EnumHid(kRazerVid);
     for (const auto& device : devices) {
         if (device.pid != kPidBlackShark || device.feature_len != kHeadsetFeatureLen) {
             continue;
@@ -508,6 +583,159 @@ bool RazerMonitor::PollHeadsetHid(BatteryReading& out) {
             return true;
         }
     }
+    return false;
+}
+
+namespace {
+
+bool PollMchoseKeyboardHid(const std::wstring& path, const std::wstring& product, USHORT pid, BatteryReading& out) {
+    HANDLE handle = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    uint8_t req[65]{};
+    req[0] = 0x00; // Report ID
+    req[1] = 0x55; // Flag
+    req[2] = 0x05; // Command: 5 (getFuncConfig)
+    req[3] = 0x00;
+    req[4] = 56;   // Checksum: (56 + 0 + 0 + 0) & 0xFF
+    req[5] = 56;   // Data Size: 56
+    req[6] = 0x00; // Offset Lo
+    req[7] = 0x00; // Offset Hi
+
+    OVERLAPPED write_ov{};
+    write_ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!write_ov.hEvent) {
+        CloseHandle(handle);
+        return false;
+    }
+
+    DWORD written = 0;
+    BOOL write_ok = WriteFile(handle, req, sizeof(req), nullptr, &write_ov);
+    if (!write_ok && GetLastError() != ERROR_IO_PENDING) {
+        CloseHandle(write_ov.hEvent);
+        CloseHandle(handle);
+        return false;
+    }
+
+    DWORD wait_res = WaitForSingleObject(write_ov.hEvent, 300);
+    if (wait_res != WAIT_OBJECT_0) {
+        CancelIo(handle);
+        CloseHandle(write_ov.hEvent);
+        CloseHandle(handle);
+        return false;
+    }
+    GetOverlappedResult(handle, &write_ov, &written, FALSE);
+    CloseHandle(write_ov.hEvent);
+
+    if (written != sizeof(req)) {
+        CloseHandle(handle);
+        return false;
+    }
+
+    uint8_t resp[65]{};
+    OVERLAPPED read_ov{};
+    read_ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!read_ov.hEvent) {
+        CloseHandle(handle);
+        return false;
+    }
+
+    BOOL read_ok = ReadFile(handle, resp, sizeof(resp), nullptr, &read_ov);
+    if (!read_ok && GetLastError() != ERROR_IO_PENDING) {
+        CloseHandle(read_ov.hEvent);
+        CloseHandle(handle);
+        return false;
+    }
+
+    wait_res = WaitForSingleObject(read_ov.hEvent, 300);
+    if (wait_res != WAIT_OBJECT_0) {
+        CancelIo(handle);
+        CloseHandle(read_ov.hEvent);
+        CloseHandle(handle);
+        return false;
+    }
+
+    DWORD read_bytes = 0;
+    GetOverlappedResult(handle, &read_ov, &read_bytes, FALSE);
+    CloseHandle(read_ov.hEvent);
+    CloseHandle(handle);
+
+    if (read_bytes < 42 || resp[1] != 0xAA || resp[2] != 0x05) {
+        return false;
+    }
+
+    const uint8_t batt_byte = resp[41];
+    const int percent = batt_byte & 0x7F;
+    const bool charging = ((batt_byte >> 7) & 1) != 0;
+
+    if (percent < 0 || percent > 100) {
+        return false;
+    }
+
+    out.online = true;
+    out.percent = percent;
+    out.charging = charging;
+    out.source = L"HID";
+    out.name = product.empty() ? L"MCHOSE K99 V3" : product;
+    out.pid = pid;
+    return true;
+}
+
+}  // namespace
+
+bool RazerMonitor::PollKeyboardHid(BatteryReading& out) {
+    if (!keyboard_path_.empty()) {
+        if (PollMchoseKeyboardHid(keyboard_path_, keyboard_.name, keyboard_.pid, out)) {
+            return true;
+        }
+        keyboard_path_.clear();
+    }
+
+    // Enumerate MCHOSE keyboards first (VID 0x3837)
+    const auto mchose_devices = EnumHid(kMchoseVid);
+    for (const auto& device : mchose_devices) {
+        if (device.output_len == 65 && device.input_len == 65 && device.usage_page == 1 && device.usage == 0) {
+            if (PollMchoseKeyboardHid(device.path, device.product, device.pid, out)) {
+                keyboard_path_ = device.path;
+                return true;
+            }
+        }
+    }
+
+    // Also support Razer wireless keyboards if any is connected
+    const auto razer_devices = EnumHid(kRazerVid);
+    for (const auto& device : razer_devices) {
+        if (device.pid == kPidViperWireless || device.pid == kPidViperWired || device.pid == kPidBlackShark) {
+            continue;
+        }
+        if (device.feature_len != kMouseFeatureLen) {
+            continue;
+        }
+        HANDLE handle = OpenHid(device.path);
+        if (handle == INVALID_HANDLE_VALUE) {
+            continue;
+        }
+        RazerReport battery{};
+        RazerReport charge{};
+        const bool ok_batt = SendRazerCommand(handle, 0x1F, 0x07, 0x80, &battery);
+        const bool ok_chg = SendRazerCommand(handle, 0x1F, 0x07, 0x84, &charge);
+        CloseHandle(handle);
+        if (ok_batt) {
+            out.online = true;
+            out.percent = HidRawToPercent(battery.arguments[1]);
+            out.charging = ok_chg && charge.arguments[1] != 0;
+            out.source = L"HID";
+            out.name = device.product.empty() ? L"Razer Keyboard" : device.product;
+            out.pid = device.pid;
+            keyboard_path_ = device.path;
+            return true;
+        }
+    }
+
     return false;
 }
 

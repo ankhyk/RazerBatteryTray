@@ -11,6 +11,7 @@ RazerBatteryPlugin& RazerBatteryPlugin::Instance() {
 RazerBatteryPlugin::RazerBatteryPlugin()
     : mouse_item_(DeviceSlot::Mouse),
       headset_item_(DeviceSlot::Headset),
+      keyboard_item_(DeviceSlot::Keyboard),
       combined_item_(DeviceSlot::Combined) {}
 
 IPluginItem* RazerBatteryPlugin::GetItem(int index) {
@@ -20,6 +21,8 @@ IPluginItem* RazerBatteryPlugin::GetItem(int index) {
     case 1:
         return &headset_item_;
     case 2:
+        return &keyboard_item_;
+    case 3:
         return &combined_item_;
     default:
         return nullptr;
@@ -35,17 +38,17 @@ void RazerBatteryPlugin::DataRequired() {
 const wchar_t* RazerBatteryPlugin::GetInfo(PluginInfoIndex index) {
     switch (index) {
     case TMI_NAME:
-        return IsChinese() ? L"Razer 电量" : L"Razer Battery";
+        return IsChinese() ? L"外设电量" : L"Peripheral Battery";
     case TMI_DESCRIPTION:
         return IsChinese()
-                   ? L"在任务栏显示 Razer 鼠标和耳机的电量与充电状态"
-                   : L"Show Razer mouse and headset battery on the taskbar";
+                   ? L"在任务栏显示鼠标、耳机与键盘的电量与充电状态"
+                   : L"Show mouse, headset, and keyboard battery on the taskbar";
     case TMI_AUTHOR:
         return L"ankhyk";
     case TMI_COPYRIGHT:
         return L"Copyright (C) 2026 ankhyk";
     case TMI_VERSION:
-        return L"1.0.0";
+        return L"1.1.0";
     case TMI_URL:
         return L"https://github.com/ankhyk/RazerBatteryTray";
     default:
@@ -124,6 +127,7 @@ void RazerBatteryPlugin::RefreshItems() {
     const bool chinese = IsChinese();
     mouse_item_.RefreshTexts(chinese);
     headset_item_.RefreshTexts(chinese);
+    keyboard_item_.RefreshTexts(chinese);
     combined_item_.RefreshTexts(chinese);
 }
 

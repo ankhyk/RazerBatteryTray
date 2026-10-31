@@ -52,8 +52,14 @@ std::wstring PercentCore(const BatteryReading& reading) {
 
 int DrawPair(HDC hdc, int x, int y, int right, int height, int icon, int gap, DeviceSlot slot,
              COLORREF color) {
-    const BatteryReading reading =
-        slot == DeviceSlot::Mouse ? RazerMonitor::Instance().Mouse() : RazerMonitor::Instance().Headset();
+    BatteryReading reading;
+    if (slot == DeviceSlot::Mouse) {
+        reading = RazerMonitor::Instance().Mouse();
+    } else if (slot == DeviceSlot::Headset) {
+        reading = RazerMonitor::Instance().Headset();
+    } else {
+        reading = RazerMonitor::Instance().Keyboard();
+    }
     const BYTE alpha = reading.online ? 255 : 96;
     const int icon_y = y + (height - icon) / 2;
     IconDraw::DrawDeviceIcon(hdc, slot, x, icon_y, icon, color, alpha);
@@ -96,6 +102,8 @@ const wchar_t* BatteryItem::GetItemId() const {
         return L"RazerMouseBatt";
     case DeviceSlot::Headset:
         return L"RazerHeadsetBatt";
+    case DeviceSlot::Keyboard:
+        return L"KeyboardBatt";
     case DeviceSlot::Combined:
     default:
         return L"RazerComboBatt";
@@ -120,7 +128,9 @@ bool BatteryItem::IsCustomDraw() const {
 
 int BatteryItem::GetItemWidth() const {
     if (slot_ == DeviceSlot::Combined) {
-        return kIcon96 + kGap96 + 40 + kSpacer96 + kIcon96 + kGap96 + 40;
+        const bool kb_online = RazerMonitor::Instance().Keyboard().online;
+        const int count = kb_online ? 3 : 2;
+        return (kIcon96 + kGap96 + 40) * count + kSpacer96 * (count - 1);
     }
     return kIcon96 + kGap96 + 40;
 }
@@ -133,7 +143,8 @@ int BatteryItem::GetItemWidthEx(void* hDC) const {
     const int icon = IconSizeFromDc(hdc, 0);
     const int pair = MeasurePair(hdc, icon, kGap96);
     if (slot_ == DeviceSlot::Combined) {
-        return pair + kSpacer96 + pair;
+        const bool kb_online = RazerMonitor::Instance().Keyboard().online;
+        return kb_online ? (pair * 3 + kSpacer96 * 2) : (pair * 2 + kSpacer96);
     }
     return pair;
 }
@@ -155,9 +166,17 @@ void BatteryItem::DrawItem(void* hDC, int x, int y, int w, int h, bool dark_mode
 
     const int icon = IconSizeFromDc(hdc, h);
     if (slot_ == DeviceSlot::Combined) {
-        const int column = (w - kSpacer96) / 2;
-        DrawPair(hdc, x, y, x + column, h, icon, kGap96, DeviceSlot::Mouse, color);
-        DrawPair(hdc, x + column + kSpacer96, y, x + w, h, icon, kGap96, DeviceSlot::Headset, color);
+        const bool kb_online = RazerMonitor::Instance().Keyboard().online;
+        if (kb_online) {
+            const int column = (w - 2 * kSpacer96) / 3;
+            DrawPair(hdc, x, y, x + column, h, icon, kGap96, DeviceSlot::Mouse, color);
+            DrawPair(hdc, x + column + kSpacer96, y, x + column * 2 + kSpacer96, h, icon, kGap96, DeviceSlot::Headset, color);
+            DrawPair(hdc, x + (column + kSpacer96) * 2, y, x + w, h, icon, kGap96, DeviceSlot::Keyboard, color);
+        } else {
+            const int column = (w - kSpacer96) / 2;
+            DrawPair(hdc, x, y, x + column, h, icon, kGap96, DeviceSlot::Mouse, color);
+            DrawPair(hdc, x + column + kSpacer96, y, x + w, h, icon, kGap96, DeviceSlot::Headset, color);
+        }
     } else {
         DrawPair(hdc, x, y, x + w, h, icon, kGap96, slot_, color);
     }

@@ -99,6 +99,21 @@ void DrawHeadsetFallback(Gdiplus::Graphics& g, Gdiplus::RectF box, Gdiplus::Colo
     g.DrawArc(&pen, band, 200.0f, 140.0f);
 }
 
+void DrawKeyboardFallback(Gdiplus::Graphics& g, Gdiplus::RectF box, Gdiplus::Color color) {
+    const float stroke = (std::max)(1.2f, box.Width / 12.0f);
+    Gdiplus::Pen pen(color, stroke);
+    pen.SetLineJoin(Gdiplus::LineJoinRound);
+    Gdiplus::RectF body(box.X + box.Width * 0.08f, box.Y + box.Height * 0.22f, box.Width * 0.84f,
+                        box.Height * 0.56f);
+    Gdiplus::GraphicsPath path;
+    AddRoundRect(path, body, body.Height * 0.20f);
+    g.DrawPath(&pen, &path);
+    const float space_w = body.Width * 0.44f;
+    const float space_x = body.X + (body.Width - space_w) * 0.5f;
+    const float space_y = body.Y + body.Height * 0.72f;
+    g.DrawLine(&pen, space_x, space_y, space_x + space_w, space_y);
+}
+
 COLORREF ScaleColor(COLORREF color, BYTE alpha) {
     if (alpha >= 255) {
         return color;
@@ -117,7 +132,12 @@ void DrawDeviceIcon(HDC hdc, DeviceSlot slot, int x, int y, int size, COLORREF c
         return;
     }
     const COLORREF draw_color = ScaleColor(color, alpha);
-    const wchar_t glyph = (slot == DeviceSlot::Headset) ? L'\uE7F6' : L'\uE962';
+    wchar_t glyph = L'\uE962';
+    if (slot == DeviceSlot::Headset) {
+        glyph = L'\uE7F6';
+    } else if (slot == DeviceSlot::Keyboard) {
+        glyph = L'\uE765';
+    }
     if (DrawSymbolGlyph(hdc, x, y, size, draw_color, glyph)) {
         return;
     }
@@ -132,6 +152,8 @@ void DrawDeviceIcon(HDC hdc, DeviceSlot slot, int x, int y, int size, COLORREF c
     const Gdiplus::Color gcolor = MakeColor(color, alpha);
     if (slot == DeviceSlot::Headset) {
         DrawHeadsetFallback(graphics, box, gcolor);
+    } else if (slot == DeviceSlot::Keyboard) {
+        DrawKeyboardFallback(graphics, box, gcolor);
     } else {
         DrawMouseFallback(graphics, box, gcolor);
     }

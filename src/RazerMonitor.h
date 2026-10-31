@@ -7,6 +7,7 @@
 enum class DeviceSlot {
     Mouse,
     Headset,
+    Keyboard,
     Combined
 };
 
@@ -26,6 +27,7 @@ public:
     void Poll(bool force);
     BatteryReading Mouse() const;
     BatteryReading Headset() const;
+    BatteryReading Keyboard() const;
 
     std::wstring ValueText(DeviceSlot slot) const;
     std::wstring SampleText(DeviceSlot slot) const;
@@ -47,19 +49,24 @@ private:
 
     bool PollMouseHid(BatteryReading& out);
     bool PollHeadsetHid(BatteryReading& out);
+    bool PollKeyboardHid(BatteryReading& out);
     static bool PollSynapseLog(uint16_t pid, BatteryReading& out);
 
     mutable std::mutex mutex_;
     BatteryReading mouse_;
     BatteryReading headset_;
+    BatteryReading keyboard_;
     std::wstring mouse_path_;
     std::wstring headset_path_;
+    std::wstring keyboard_path_;
     uint8_t mouse_txn_ = 0x1F;
     uint64_t last_poll_ms_ = 0;
     bool mouse_was_low_ = false;
     bool headset_was_low_ = false;
+    bool keyboard_was_low_ = false;
     bool mouse_notify_pending_ = false;
     bool headset_notify_pending_ = false;
+    bool keyboard_notify_pending_ = false;
 
     int poll_interval_sec_ = 10;
     int low_battery_percent_ = 20;
